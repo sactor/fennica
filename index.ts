@@ -31,7 +31,7 @@ namespace Fennica {
     publisher?: string,
     year?: number
   }
-  export type Result = {
+  export type BookObject = {
     author: Author,
     original_title: string,
     title: string,
@@ -43,6 +43,10 @@ namespace Fennica {
     isbn: string[],
     udk_class: string,
     coauthors: Author[]
+  }
+  export type Result = {
+    result: BookObject,
+    url?: string
   }
   export type SearchResult = {
     results: Result[],
@@ -58,7 +62,7 @@ namespace Fennica {
   const SEARCH_MODE_MAP = {
     [SEARCH_MODE.ISBN]: '020B',
     [SEARCH_MODE.TITLE]: 'TALL',
-    [SEARCH_MODE.AUTHOR]: 'NAME'
+    [SEARCH_MODE.AUTHOR]: 'NAME%2B'
   };
 
   const fields:{[key:string]: string} = {
@@ -246,9 +250,19 @@ namespace Fennica {
     }
   };
 
-  function handleSingleBook(search: string, $: any): any | Result {
+  function handleSingleBook(search: string, $: any): null | BookObject {
     let bibTags = $('.bibTag');
-    let bookObject: {[key: string]: any} = {};
+    let bookObject: BookObject = {
+      author: {
+        lastname: ''
+      },
+      original_title: '',
+      title: '',
+      language: '',
+      isbn: [],
+      udk_class: '',
+      coauthors: []
+    };
     let rejected = false;
     bibTags.each((i: number, ele: any) => {
       let field = handleField($(ele), $);
@@ -264,10 +278,10 @@ namespace Fennica {
     if (rejected) {
       return null;
     }
-    if (typeof bookObject['original_title'] !== 'undefined') {
+    if (bookObject['original_title'].length > 0) {
       return bookObject;
     }
-    if (typeof bookObject['title'] !== 'undefined') {
+    if (bookObject['title'].length > 0) {
       bookObject['original_title'] = bookObject['title'];
       return bookObject;
     }
@@ -278,19 +292,31 @@ namespace Fennica {
 
   function handleSearchResult(search: string, mode: SEARCH_MODE, $: any): Promise<Result[]> {
     return new Promise((resolve, reject) => {
+      let results: Result[] = [];
       if ($('.noHitsError').length) {
         resolve([]);
       }
       switch (mode) {
+        case SEARCH_MODE.AUTHOR:
+          // Not supported yet
+          break;
         case SEARCH_MODE.ISBN:
-          resolve(handleSingleBook(search, $));
+          let result = handleSingleBook(search, $);
+          if (result !== null) {
+            results.push({result});
+          }
           break;
         case SEARCH_MODE.TITLE:
           let links = $('.line1Link');
           if (!links.length) {
             // Probably a direct hit, handle a single book result
-            resolve([handleSingleBook(search, $)]);
-            return;
+            let result = handleSingleBook(search, $);
+            if (result !== null) {
+              results.push({
+                result
+              });
+            }
+            break;
           }
           let promises: Array<Promise<Result>> = [];
           links = links.each(function () {
@@ -306,9 +332,10 @@ namespace Fennica {
               promises.push(new Promise((linkresolve, linkreject) => {
                 // debug($(this).find('a').attr('href')); // Logs link where single book info is found
                 let href = $(this).find('a').attr('href');
+                let searchurl = 'https://fennica.linneanet.fi/vwebv/' + href;
                 debug('starting sub request ' + href);
                 jsdom.env(
-                  'https://fennica.linneanet.fi/vwebv/' + href,
+                  searchurl,
                   ['http://code.jquery.com/jquery.js'],
                   (err, window: Window) => {
                     debug('sub request done ' + href);
@@ -317,7 +344,15 @@ namespace Fennica {
                       linkreject(err);
                       return;
                     }
-                    linkresolve(handleSingleBook(search, window.$));
+                    let result = handleSingleBook(search, window.$);
+                    if (result !== null) {
+                      linkresolve({
+                        result,
+                        url: searchurl
+                      });
+                    } else {
+                      linkresolve(null);
+                    }
                   }
                 );
               }));
@@ -331,7 +366,7 @@ namespace Fennica {
           });
           return;
       }
-      resolve(null);
+      resolve(results);
     });
   }
 

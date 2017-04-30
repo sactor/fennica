@@ -1,6 +1,6 @@
 {
   "name": "fennica",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Custom API for The National Bibliography of Finland, Fennica",
   "main": "index.js",
   "scripts": {
@@ -8,8 +8,17 @@
     "test": "npm run test-ts",
     "test-ts": "tsc --p tsconfig.json"
   },
-  "author": "Antti Kumpulainen",
+  "author": {
+    "name": "Antti Kumpulainen",
+    "email": "sactor.net@gmail.com"
+  },
+  "homepage": "https://github.com/sactor/fennica",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sactor/fennica.git"
+  },
+  "typings": "index.d.ts",
   "dependencies": {
     "debug": "^2.6.3",
     "jsdom": "^9.9.1"

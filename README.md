@@ -8,21 +8,29 @@ This is an unofficial API which parses HTML results and will break if the HTTP i
 npm install fennica
 ```
 
+## Usage
+
 ```javascript
-const fennica = require('fennica');
-const SEARCH_MODE = require('fennica').SEARCH_MODE;
+const fennica = require('fennica').default;
+
+fennica.search('Lord of the Rings', fennica.SEARCH_MODE.TITLE)
+  .then(function(res) {
+    console.log(JSON.stringify(res, null, 2));
+  });
 ```
 
 ## API
 
-### `fennica.search(search, mode)`
+### `api.search(search, mode)`
 
 Executes a search.
 
 #### Parameters:
 
  * `search`, a String, search string
- * `mode`, a String, one of the modes available in SEARCH_MODE constant.
+ * `mode`, integer, one of the modes available in `fennica.SEARCH_MODE` constant:
+   * `SEARCH_MODE.TITLE`
+   * `SEARCH_MODE.ISBN`
 
 #### Returns:
 
@@ -32,48 +40,51 @@ Returns a Promise which will resolve once the search is complete. Promise result
 {
   "results": [ // Results array
     {
-      "author": { // Author information
-        "lastname": "Pratchett", // Last name of the author, If author has only one name, e.g. Homeros, it will be here
-        "firstname": "Terry", // Optional
-        "additional": [ // Optional, describes author (in Finnish)
-          "kirjoittaja"
-        ] 
-      },
-      "original_title": "Witches abroad", // Title in original language
-      "title": "Noitia maisemissa", // Localised title
-      "language": "suomi", // Language
-      "publishing_information": { // Publishing information
-        "place": "Hämeenlinna", // Place of publishing
-        "publisher": "Karisto", // Publisher
-        "year": "2000" // Year of publishing
-      },
-      "measurements": { // Page measurements
-        "pages": "309", // Page count
-        "height": "18" // Height, in cm
-      },
-      "additional": { // Optional, Additional information about the book
-        "editions": [ // Parsed edition information from the additional information
-          {
-            "edition": "3", // Edition number
-            "year": "2002" // Edition year
-          }
-        ],
-        "raw": "Lisäpainokset: 3. p. 2002." // Raw additional information from the bibliography
-      },
-      "original_language": "eng", // Optional, Original language
-      "isbn": [ // ISBN information, may contain multiple ISBNs if the book has several editions
-        "951-23-4113-1 nidottu"
-      ],
-      "udk_class": "820 -3", // The UDC class (or UDK in Finnish)
-      "coauthors": [ // Co authors of the book
-        {
-          "lastname": "Sinkkonen",
-          "firstname": "Marja", // Optional
-          "additional": [ // Optional, describes co-author (in Finnish)
-            "kääntäjä"
+      "result": { // Book object
+        "author": { // Author information
+          "lastname": "Pratchett", // Last name of the author, If author has only one name, e.g. Homeros, it will be here
+          "firstname": "Terry", // Optional
+          "additional": [ // Optional, describes author (in Finnish)
+            "kirjoittaja"
           ] 
-        }
-      ]
+        },
+        "original_title": "Witches abroad", // Title in original language
+        "title": "Noitia maisemissa", // Localised title
+        "language": "suomi", // Language
+        "publishing_information": { // Publishing information
+          "place": "Hämeenlinna", // Place of publishing
+          "publisher": "Karisto", // Publisher
+          "year": "2000" // Year of publishing
+        },
+        "measurements": { // Page measurements
+          "pages": "309", // Page count
+          "height": "18" // Height, in cm
+        },
+        "additional": { // Optional, Additional information about the book
+          "editions": [ // Parsed edition information from the additional information
+            {
+              "edition": "3", // Edition number
+              "year": "2002" // Edition year
+            }
+          ],
+          "raw": "Lisäpainokset: 3. p. 2002." // Raw additional information from the bibliography
+        },
+        "original_language": "eng", // Optional, Original language
+        "isbn": [ // ISBN information, may contain multiple ISBNs if the book has several editions
+          "951-23-4113-1 nidottu"
+        ],
+        "udk_class": "820 -3", // The UDC class (or UDK in Finnish)
+        "coauthors": [ // Co authors of the book
+          {
+            "lastname": "Sinkkonen",
+            "firstname": "Marja", // Optional
+            "additional": [ // Optional, describes co-author (in Finnish)
+              "kääntäjä"
+            ] 
+          }
+        ]
+      },
+      "url": "https://fennica.linneanet.fi/vwebv/holdingsInfo?searchId=194&recCount=10&recPointer=1&bibId=663120" // Optional, Direct URL to book result
     }
   ],
   "url": "https://fennica.linneanet.fi/vwebv/search?searchArg=Noitia%20maisemissa&searchCode=TALL&setLimit=2&recCount=10&searchType=1&page.search.search.button=Hae" // URL used for this search
