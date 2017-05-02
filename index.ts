@@ -32,6 +32,7 @@ export namespace Fennica {
     year?: number
   }
   export type BookObject = {
+    bib_id: string,
     author: Author,
     original_title: string,
     title: string,
@@ -188,7 +189,7 @@ export namespace Fennica {
       let parts: string[] = $('<div>' + input + '</div>').text().split(',');
       let dateinfo: PublishingInformation = {};
       parts.map((part) => {
-        let partinfo = part.trim().replace(/[\[\].]/g, '').replace(/(?:cop ([\d]{4}))/, '\1');
+        let partinfo = part.trim().replace(/[\[\].]/g, '').replace(/(?:cop ([\d]{4}))/, '$1');
         if (isNaN(parseInt(partinfo))) {
           let subparts = partinfo.split(':');
           dateinfo['place'] = subparts[0].trim();
@@ -259,9 +260,26 @@ export namespace Fennica {
     }
   };
 
-  function handleSingleBook(search: string, $: any): null | BookObject {
+  function handleSingleBook(search: string, $: any, bibId?: string): null | BookObject {
     let bibTags = $('.bibTag');
+    if (typeof bibId === 'undefined') {
+      // find bibId for the book on the page
+      let actionBoxLinks = $('.actionBox a');
+      actionBoxLinks.each((i: number, ele: any) => {
+        if ($(ele).text().trim().toLowerCase().search(/marc/) !== -1) {
+          let bibMatch = $(ele).attr('href').match(/bibId=(\d+)/);
+          if (bibMatch !== null) {
+            bibId = bibMatch[1];
+            return false;
+          }
+        }
+      });
+    }
+    if (typeof bibId === 'undefined') {
+      return null;
+    }
     let bookObject: BookObject = {
+      bib_id: bibId,
       author: {
         lastname: ''
       },
@@ -353,7 +371,11 @@ export namespace Fennica {
                       linkreject(err);
                       return;
                     }
-                    let result = handleSingleBook(search, window.$);
+                    let bibMatch = searchurl.match(/bibId=([\d]+)/);
+                    let result = null;
+                    if (bibMatch !== null) {
+                      result = handleSingleBook(search, window.$, bibMatch[1]);
+                    }
                     if (result !== null) {
                       linkresolve({
                         result,
