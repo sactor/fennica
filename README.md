@@ -11,9 +11,9 @@ npm install fennica
 ## Usage
 
 ```javascript
-const fennica = require('fennica').default;
+const Fennica = require('fennica').Fennica;
 
-fennica.search('Lord of the Rings', fennica.SEARCH_MODE.TITLE)
+Fennica.search('Lord of the Rings', Fennica.SEARCH_MODE.TITLE)
   .then(function(res) {
     console.log(JSON.stringify(res, null, 2));
   });
@@ -28,7 +28,7 @@ Executes a search.
 #### Parameters:
 
  * `search`, a String, search string
- * `mode`, integer, one of the modes available in `fennica.SEARCH_MODE` constant:
+ * `mode`, integer, one of the modes available in `Fennica.SEARCH_MODE` constant:
    * `SEARCH_MODE.TITLE`
    * `SEARCH_MODE.ISBN`
 

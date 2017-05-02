@@ -7,7 +7,7 @@ interface Window {
   $: any;
 }
 
-namespace Fennica {
+export namespace Fennica {
   export type Author = {
     lastname: string,
     firstname?: string,
@@ -40,9 +40,13 @@ namespace Fennica {
     measurements?: Measurements,
     additional?: Additional,
     original_language?: string,
-    isbn: string[],
+    isbn?: ISBNObject[],
     udk_class: string,
     coauthors: Author[]
+  }
+  export type ISBNObject = {
+    isbn: string,
+    additional?: string
   }
   export type Result = {
     result: BookObject,
@@ -124,11 +128,16 @@ namespace Fennica {
     title: (input: string): string => {
       return input.split('/')[0].trim();
     },
-    isbn: (input: string): string[] => {
+    isbn: (input: string): ISBNObject[] => {
       return input.split('<br>').map((val) => {
-        return val.trim();
+        let parts = val.trim().split(' ');
+        let isbnInfo: ISBNObject = {isbn: parts[0]};
+        if (parts.length > 1) {
+          isbnInfo['additional'] = parts.slice(1).join(' ');
+        }
+        return isbnInfo;
       }).filter((val) => {
-        return val.length > 0;
+        return val['isbn'].length > 0;
       });
     },
     original_title: (input: string, $: any): string => {
@@ -179,7 +188,7 @@ namespace Fennica {
       let parts: string[] = $('<div>' + input + '</div>').text().split(',');
       let dateinfo: PublishingInformation = {};
       parts.map((part) => {
-        let partinfo = part.trim().replace(/[\[\].]/g, '');
+        let partinfo = part.trim().replace(/[\[\].]/g, '').replace(/(?:cop ([\d]{4}))/, '\1');
         if (isNaN(parseInt(partinfo))) {
           let subparts = partinfo.split(':');
           dateinfo['place'] = subparts[0].trim();
@@ -402,5 +411,3 @@ namespace Fennica {
     );
   }
 }
-
-export default Fennica;
