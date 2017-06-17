@@ -76,6 +76,7 @@ export namespace Fennica {
     'Nimeke:': 'title',
     'Kieli:': 'language',
     'Julkaistu:': 'publishing_information',
+    'Kustantaja:': 'publishing_information',
     'Alkuteoksen kieli:': 'original_language',
     'UDK-luokitus:': 'udk_class',
     'ISBN:': 'isbn',
