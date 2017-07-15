@@ -1,6 +1,6 @@
 {
   "name": "fennica",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Custom API for The National Bibliography of Finland, Fennica",
   "main": "index.js",
   "scripts": {
