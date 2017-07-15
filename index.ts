@@ -38,6 +38,7 @@ export namespace Fennica {
     original_title: string,
     title: string,
     language: string,
+    edition?: Additional,
     publishing_information?: PublishingInformation,
     measurements?: Measurements,
     additional?: Additional,
