@@ -31,6 +31,7 @@ Executes a search.
  * `mode`, integer, one of the modes available in `Fennica.SEARCH_MODE` constant:
    * `SEARCH_MODE.TITLE`
    * `SEARCH_MODE.ISBN`
+   * `SEARCH_MODE.AUTHOR`
 
 #### Returns:
 
@@ -51,6 +52,14 @@ Returns a Promise which will resolve once the search is complete. Promise result
         "original_title": "Witches abroad", // Title in original language
         "title": "Noitia maisemissa", // Localised title
         "language": "suomi", // Language
+        "edition": { // Optional, edition information about the book (note that additional may contain more editions)
+          "editions": [
+            {
+              "edition": 8
+            }
+          ],
+          "raw": "8. p."
+        },
         "publishing_information": { // Publishing information
           "place": "Hämeenlinna", // Place of publishing
           "publisher": "Karisto", // Publisher
@@ -63,8 +72,8 @@ Returns a Promise which will resolve once the search is complete. Promise result
         "additional": { // Optional, Additional information about the book
           "editions": [ // Parsed edition information from the additional information
             {
-              "edition": "3", // Edition number
-              "year": "2002" // Edition year
+              "edition": 3, // Edition number
+              "year": 2002 // Edition year
             }
           ],
           "raw": "Lisäpainokset: 3. p. 2002." // Raw additional information from the bibliography
