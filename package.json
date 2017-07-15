@@ -21,7 +21,8 @@
   "typings": "index.d.ts",
   "dependencies": {
     "debug": "^2.6.3",
-    "jsdom": "^9.9.1"
+    "jsdom": "^9.9.1",
+    "md5": "^2.2.1"
   },
   "devDependencies": {
     "@types/debug": "0.0.29",

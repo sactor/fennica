@@ -1,5 +1,6 @@
 import * as jsdom from 'jsdom';
 import * as _debug from 'debug';
+import * as md5 from 'md5';
 
 let debug = _debug('fennica');
 
@@ -15,11 +16,11 @@ export namespace Fennica {
   }
   export type Edition = {
     edition: number,
-    year: number
+    year?: number
   }
   export type Additional = {
     editions: Edition[],
-    raw: string
+    raw?: string
   }
   export type Measurements = {
     pages?: number,
@@ -54,7 +55,7 @@ export namespace Fennica {
     url?: string
   }
   export type SearchResult = {
-    results: Result[],
+    results: Array<Result | Author>,
     url: string
   }
 
@@ -83,7 +84,8 @@ export namespace Fennica {
     'Ulkoasu:': 'measurements',
     'Asiasana:': 'keywords',
     'Huomautus:': 'additional',
-    'Muu(t) tekijä(t):': 'coauthors'
+    'Muu(t) tekijä(t):': 'coauthors',
+    'Painos:': 'edition',
   };
 
   const specials:{[key: string]: Function} = {
@@ -107,7 +109,7 @@ export namespace Fennica {
     },
     additional: (input: string, $: any): Additional => {
       let raw = $('<div>' + input + '</div>').text();
-      let re = /(\d{1,2})\.(?:-(\d{1,2})\.)? p\. (\d{4})\./g;
+      let re = /(\d{1,2})\.(?:-(\d{1,2})\.)? p\.(?: (\d{4}))?/g;
       let result;
       let additional: Additional = {
         editions: [],
@@ -123,6 +125,44 @@ export namespace Fennica {
           }
         } else {
           additional.editions.push({ edition: editionStart, year });
+        }
+      }
+      return additional;
+    },
+    edition: (input: string, $: any): Additional => {
+      let raw = $('<div>' + input + '</div>').text();
+      let re = /(\d{1,2})\.(?:-(\d{1,2})\.)? p\.(?: (\d{4}))?/g;
+      let result;
+      let additional: Additional = {
+        editions: [],
+        raw
+      };
+      while ((result = re.exec(raw)) !== null) {
+        let editionStart = parseInt(result[1]);
+        let editionEnd = parseInt(result[2]);
+        let year;
+        if (typeof result[3] !== 'undefined') {
+          year = parseInt(result[3]);
+        }
+        let editionObject: Edition;
+        if (editionEnd) {
+          for (let i: number = editionStart; i <= editionEnd; i++) {
+            editionObject = {
+              edition: i
+            };
+            if (typeof year !== 'undefined') {
+              editionObject.year = year;
+            }
+            additional.editions.push(editionObject);
+          }
+        } else {
+          editionObject = {
+            edition: editionStart
+          };
+          if (typeof year !== 'undefined') {
+            editionObject.year = year;
+          }
+        additional.editions.push(editionObject);
         }
       }
       return additional;
@@ -318,15 +358,35 @@ export namespace Fennica {
     return null;
   }
 
-  function handleSearchResult(search: string, mode: SEARCH_MODE, $: any): Promise<Result[]> {
+  function handleSearchResult(search: string, mode: SEARCH_MODE, $: any): Promise<Array<Result | Author>> {
     return new Promise((resolve, reject) => {
-      let results: Result[] = [];
+      let results: Array<Result | Author> = [];
       if ($('.noHitsError').length) {
         resolve([]);
       }
       switch (mode) {
         case SEARCH_MODE.AUTHOR:
-          // Not supported yet
+          let nameElements = $('.resultHeading a');          
+          let repeatchecker: string[] = [];
+          nameElements.each(function() {
+            let parts = $(this).text().trim().split(',');
+            if (parts[0].length > 0) {
+              let result: Author = {
+                lastname: parts[0]
+              };
+              if (parts.length > 1) {
+                let firstname = parts[1].trim().replace(/([^A-Z])\.$/, '$1');
+                if (firstname.length > 0) {
+                  result.firstname = firstname;
+                }
+              }
+              let hash = md5(result.lastname + (typeof result.firstname !== 'undefined' ? result.firstname : ''));
+              if (repeatchecker.indexOf(hash) === -1) {
+                repeatchecker.push(hash);
+                results.push(result);
+              }
+            }
+          });
           break;
         case SEARCH_MODE.ISBN:
           let result = handleSingleBook(search, $);
@@ -347,7 +407,7 @@ export namespace Fennica {
             break;
           }
           let promises: Array<Promise<Result>> = [];
-          links = links.each(function () {
+          links.each(function () {
             let titleParts = $(this).text().trim().replace(/\.$/, '').split('/');
             let title: string;
             if (titleParts.length > 1) {
