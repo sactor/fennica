@@ -1,3 +1,4 @@
+.vscode/
 .gitignore
 index.js.map
 index.ts
