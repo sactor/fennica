@@ -32,6 +32,7 @@ Executes a search.
    * `SEARCH_MODE.TITLE`
    * `SEARCH_MODE.ISBN`
    * `SEARCH_MODE.AUTHOR`
+   * `SEARCH_MODE.BIB`
 
 #### Returns:
 
