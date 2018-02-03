@@ -1,497 +1,1091 @@
-import * as jsdom from 'jsdom';
-import * as _debug from 'debug';
-import * as md5 from 'md5';
+import * as jsdom from "jsdom";
+const { JSDOM } = jsdom;
+import * as _debug from "debug";
+import * as md5 from "md5";
 
-let debug = _debug('fennica');
+let debug = _debug("fennica");
+let debugWarning = _debug("warning");
 
-interface Window {
-  $: any;
-}
+const cookieJar = new jsdom.CookieJar();
 
 export namespace Fennica {
+  export type MarcDataField = {
+    code: string;
+    value: string;
+  };
+  export type MarcIndicator = string[];
+  export type MarcControlField = string;
+  export type MarcData = {
+    type: string;
+    isControlField: boolean;
+    data: MarcControlField | MarcDataField[];
+    indicator?: MarcIndicator;
+  };
   export type Author = {
-    lastname: string,
-    firstname?: string,
-    additional?: string[]
-  }
+    lastname: string;
+    firstname?: string;
+    additional?: string[];
+  };
   export type Edition = {
-    edition: number,
-    year?: number
-  }
+    edition: number;
+    year?: number;
+  };
   export type Additional = {
-    editions: Edition[],
-    raw?: string
-  }
+    editions: Edition[];
+    raw?: string;
+  };
   export type Measurements = {
-    pages?: number,
-    height?: number,
-    additional?: string
-  }
+    pages?: number;
+    height?: number;
+    additional?: string;
+  };
   export type PublishingInformation = {
-    place?: string,
-    publisher?: string,
-    year?: number
-  }
+    place?: string;
+    publisher?: string;
+    year?: number;
+    year_original?: number;
+    year_end?: number;
+  };
   export type BookObject = {
-    bib_id: string,
-    author: Author,
-    original_title: string,
-    title: string,
-    language: string,
-    edition?: Additional,
-    publishing_information?: PublishingInformation,
-    measurements?: Measurements,
-    additional?: Additional,
-    original_language?: string,
-    isbn?: ISBNObject[],
-    udk_class: string,
-    coauthors: Author[]
-  }
+    bib_id: string;
+    author: Author;
+    original_title: string;
+    title: string;
+    language: string;
+    edition?: Additional;
+    publishing_information?: PublishingInformation;
+    measurements?: Measurements;
+    additional?: Additional;
+    original_language?: string;
+    isbn?: ISBNObject[];
+    udk_class: string;
+    ykl_class: string[];
+    coauthors: Author[];
+    keywords: string[];
+    series?: Series;
+    original_series?: Series;
+  };
+
+  export type Series = {
+    name: string;
+    volume?: string;
+  };
+
+  export type BookField = {
+    field: string;
+    value:
+      | string
+      | Author
+      | Additional
+      | Measurements
+      | PublishingInformation
+      | ISBNObject[]
+      | Author[];
+  };
   export type ISBNObject = {
-    isbn: string,
-    additional?: string
-  }
+    isbn: string;
+    additional?: string;
+  };
   export type Result = {
-    result: BookObject,
-    url?: string
-  }
+    result: BookObject;
+    url?: string;
+  };
   export type SearchResult = {
-    results: Array<Result | Author>,
-    url: string
-  }
+    results: Array<Result | Author>;
+    url: string;
+  };
 
   export enum SEARCH_MODE {
     ISBN,
     TITLE,
-    AUTHOR
+    AUTHOR,
+    BIB
   }
 
+  const SUPPORTED_MARC_FIELDS = [
+    "008",
+    "020",
+    "041",
+    "080",
+    "084",
+    "100",
+    "240",
+    "245",
+    "246",
+    "250",
+    "260",
+    "300",
+    "490",
+    "650",
+    "700",
+    "800",
+    "830"
+  ];
+  const IGNORED_MARC_FIELDS = [
+    "000",
+    "001",
+    "005",
+    "015",
+    "035",
+    "040",
+    "042",
+    "264",
+    "336",
+    "337",
+    "338",
+    "610"
+  ];
+
+  const IGNORED_MARC_FIELDS_REGEX = [
+    /^5/, // notifications
+    /^7[6-8]/,
+    /^8[4-8]/,
+    /^9/
+  ];
+
   const SEARCH_MODE_MAP = {
-    [SEARCH_MODE.ISBN]: '020B',
-    [SEARCH_MODE.TITLE]: 'TALL',
-    [SEARCH_MODE.AUTHOR]: 'NAME%2B'
+    [SEARCH_MODE.ISBN]: "020B",
+    [SEARCH_MODE.TITLE]: "TALL",
+    [SEARCH_MODE.AUTHOR]: "NAME%2B"
   };
 
-  const fields:{[key:string]: string} = {
-    'Tekijä:': 'author',
-    'Teos:': 'original_title',
-    'Nimeke:': 'title',
-    'Kieli:': 'language',
-    'Julkaistu:': 'publishing_information',
-    'Kustantaja:': 'publishing_information',
-    'Alkuteoksen kieli:': 'original_language',
-    'UDK-luokitus:': 'udk_class',
-    'ISBN:': 'isbn',
-    'Ulkoasu:': 'measurements',
-    'Asiasana:': 'keywords',
-    'Huomautus:': 'additional',
-    'Muu(t) tekijä(t):': 'coauthors',
-    'Painos:': 'edition',
-  };
-
-  const specials:{[key: string]: Function} = {
-    author: (input: string, $: any): Author | false => {
-      let authorinfo = $('<div>' + input + '</div>').text().split('\n')[0].split(',');
-      return handleSingleAuthorRow(authorinfo);
-    },
-    coauthors: (input: string, $: any): Author[] => {
-      let rows = $('<div>' + input + '</div>').text().split('\n');
-      let authors: Author[] = [];
-      rows.forEach((element: string) => {
-        let raw = element.trim();
-        if (raw.length) {
-          let author = handleSingleAuthorRow(raw.split(','));
-          if (author !== false) {
-            authors.push(author);
-          }
-        }
-      });
-      return authors;
-    },
-    additional: (input: string, $: any): Additional => {
-      let raw = $('<div>' + input + '</div>').text();
-      let re = /(\d{1,2})\.(?:-(\d{1,2})\.)? p\.(?: (\d{4}))?/g;
-      let result;
-      let additional: Additional = {
-        editions: [],
-        raw
-      };
-      while ((result = re.exec(raw)) !== null) {
-        let editionStart = parseInt(result[1]);
-        let editionEnd = parseInt(result[2]);
-        let year = parseInt(result[3]);
-        if (editionEnd) {
-          for (let i: number = editionStart; i <= editionEnd; i++) {
-            additional.editions.push({ edition: i, year });
-          }
-        } else {
-          additional.editions.push({ edition: editionStart, year });
-        }
-      }
-      return additional;
-    },
-    edition: (input: string, $: any): Additional => {
-      let raw = $('<div>' + input + '</div>').text();
-      let re = /(\d{1,2})\.(?:-(\d{1,2})\.)? p\.(?: (\d{4}))?/g;
-      let result;
-      let additional: Additional = {
-        editions: [],
-        raw
-      };
-      while ((result = re.exec(raw)) !== null) {
-        let editionStart = parseInt(result[1]);
-        let editionEnd = parseInt(result[2]);
-        let year;
-        if (typeof result[3] !== 'undefined') {
-          year = parseInt(result[3]);
-        }
-        let editionObject: Edition;
-        if (editionEnd) {
-          for (let i: number = editionStart; i <= editionEnd; i++) {
-            editionObject = {
-              edition: i
-            };
-            if (typeof year !== 'undefined') {
-              editionObject.year = year;
-            }
-            additional.editions.push(editionObject);
-          }
-        } else {
-          editionObject = {
-            edition: editionStart
-          };
-          if (typeof year !== 'undefined') {
-            editionObject.year = year;
-          }
-        additional.editions.push(editionObject);
-        }
-      }
-      return additional;
-    },
-    title: (input: string): string => {
-      return input.split('/')[0].trim();
-    },
-    isbn: (input: string): ISBNObject[] => {
-      return input.split('<br>').map((val) => {
-        let parts = val.trim().split(' ');
-        let isbnInfo: ISBNObject = {isbn: parts[0]};
-        if (parts.length > 1) {
-          isbnInfo['additional'] = parts.slice(1).join(' ');
-        }
-        return isbnInfo;
-      }).filter((val) => {
-        return val['isbn'].length > 0;
-      });
-    },
-    original_title: (input: string, $: any): string => {
-      return $('<div>' + input + '</div>').text().replace(/[\[\]]/g, '').trim();
-    },
-    measurements: (input: string, $: any): Measurements => {
-      let measurements: Measurements = {};
-      let parts: string[] = $('<div>' + input + '</div>').text().split(/[;:,]/);
-      parts.map((val) => {
-        let propparts = val.trim().split(' ');
-        if (propparts.length > 1) {
-          switch (propparts[1]) {
-            case 'cm':
-              measurements['height'] = parseInt(propparts[0]);
-              break;
-            case 'sivua':
-            case 's.':
-              measurements['pages'] = parseInt(propparts[0]);
-              break;
-            default:
-              debug('Dunno what is this prop:');
-              debug(val);
-          }
-        } else {
-          switch (propparts[0]) {
-            case 'kuvitettu':
-              measurements['additional'] = propparts[0];
-              break;
-            default:
-              debug('Dunno how to handle parts for measurements prop: ');
-              debug(val);
-          }
-        }
-      });
-      return measurements;
-    },
-    keywords: (input: string, $: any): string[] => {
-      let parts: string[] = $('<div>' + input + '</div>').text().split('\n');
-      parts = parts.map((part) => {
-        return part.replace('(ysa)', '').trim();
-      });
-      parts = parts.filter((part) => {
-        return part.length;
-      });
-      return parts;
-    },
-    publishing_information: (input: string, $: any): PublishingInformation => {
-      let parts: string[] = $('<div>' + input + '</div>').text().split(',');
-      let dateinfo: PublishingInformation = {};
-      parts.map((part) => {
-        let partinfo = part.trim().replace(/[\[\].]/g, '').replace(/(?:cop ([\d]{4}))/, '$1');
-        if (isNaN(parseInt(partinfo))) {
-          let subparts = partinfo.split(':');
-          dateinfo['place'] = subparts[0].trim();
-          if (subparts.length > 1) {
-            dateinfo['publisher'] = subparts[1].trim();
-          }
-          if (subparts.length > 2) {
-            debug('PARSE NOTICE: Apparently possible to have more parts');
-            debug(subparts);
-          }
-        } else {
-          dateinfo['year'] = parseInt(partinfo);
-        }
-      });
-      return dateinfo;
-    }
-  };
   function handleSingleAuthorRow(authorinfo: string[]): Author | false {
-    let author: Author = { lastname: '' };
+    let author: Author = { lastname: "" };
     for (let i = 0; i < authorinfo.length; i++) {
       let info = authorinfo[i].trim();
       switch (i) {
         case 0:
-          author['lastname'] = info.replace(/\.$/, '');
+          author["lastname"] = info.replace(/\.$/, "");
           break;
         case 1:
-          author['firstname'] = info.replace(/([^A-Z])\.$/, '$1');
+          author["firstname"] = info.replace(/([^A-Z])\.$/, "$1");
           break;
         default:
-          info = info.replace(/\.$/, '');
-          if (info.includes('ennakkotieto')) {
-            return false;
+          if (info.length) {
+            info = info.replace(/\.$/, "");
+            if (info.includes("ennakkotieto")) {
+              return false;
+            }
+            if (typeof author["additional"] === "undefined") {
+              author["additional"] = [];
+            }
+            author["additional"].push(info);
           }
-          if (typeof author['additional'] === 'undefined') {
-            author['additional'] = [];
-          }
-          author['additional'].push(info);
       }
     }
     return author;
   }
 
-  let handleField = (row: any, $: any): any => {
-    if (row.find('.holdingsLabel').length > 0) {
-      return null;
-    }
-    let field: string = row.find('.fieldLabelSpan').text();
-    if (typeof fields[field] !== 'undefined') {
-      let value;
-      if (typeof specials[fields[field]] !== 'undefined') {
-        value = row.find('.subfieldData').html().trim();
-        value = specials[fields[field]](value, $);
-        if (value === false) {
-          return {
-            field: 'rejected',
-            value: null
+  function handleEdition(input: string): Additional {
+    let re = /(\d{1,2})\.(?:-(\d{1,2})\.)?(?: uud\.)? p(?:ainos)?\.(?: (\d{4}))?/g;
+    let result;
+    let additional: Additional = {
+      editions: [],
+      raw: input
+    };
+    while ((result = re.exec(input)) !== null) {
+      let editionStart = parseInt(result[1]);
+      let editionEnd = parseInt(result[2]);
+      let year;
+      if (typeof result[3] !== "undefined") {
+        year = parseInt(result[3]);
+      }
+      let editionObject: Edition;
+      if (editionEnd) {
+        for (let i: number = editionStart; i <= editionEnd; i++) {
+          editionObject = {
+            edition: i
           };
+          if (typeof year !== "undefined") {
+            editionObject.year = year;
+          }
+          additional.editions.push(editionObject);
         }
       } else {
-        value = row.find('.subfieldData').text().trim();
+        editionObject = {
+          edition: editionStart
+        };
+        if (typeof year !== "undefined") {
+          editionObject.year = year;
+        }
+        additional.editions.push(editionObject);
       }
-      return {
-        field: fields[field],
-        value: value
-      };
-    } else {
-      return null;
     }
-  };
+    if (!additional.editions.length) {
+      // Checking if we can understand finnish
+      const edtable = [
+        "Ensimmäinen",
+        "Toinen",
+        "Kolmas",
+        "Neljäs",
+        "Viides",
+        "Kuudes",
+        "Seitsemäs",
+        "Kahdeksas",
+        "Yhdeksäs",
+        "Kymmenes"
+      ];
+      re = new RegExp("(" + edtable.join("|") + ") p(?:ainos)?\\.");
+      if ((result = re.exec(input)) !== null) {
+        let editionObject = {
+          edition: edtable.indexOf(result[1]) + 1
+        };
+        additional.editions.push(editionObject);
+      }
+    }
+    return additional;
+  }
 
-  function handleSingleBook(search: string, $: any, bibId?: string): null | BookObject {
-    let bibTags = $('.bibTag');
-    if (typeof bibId === 'undefined') {
-      // find bibId for the book on the page
-      let actionBoxLinks = $('.actionBox a');
-      actionBoxLinks.each((i: number, ele: any) => {
-        if ($(ele).text().trim().toLowerCase().search(/marc/) !== -1) {
-          let bibMatch = $(ele).attr('href').match(/bibId=(\d+)/);
-          if (bibMatch !== null) {
-            bibId = bibMatch[1];
-            return false;
-          }
+  let handleMarcField = (data: MarcData): BookField[] => {
+    let indicatorString =
+      typeof data.indicator !== "undefined" ? data.indicator.join("") : "";
+    if (SUPPORTED_MARC_FIELDS.indexOf(data.type) === -1) {
+      let unhandled = true;
+      if (IGNORED_MARC_FIELDS.indexOf(data.type) !== -1) {
+        unhandled = false;
+      }
+      IGNORED_MARC_FIELDS_REGEX.forEach((regex: RegExp) => {
+        if (regex.test(data.type)) {
+          unhandled = false;
         }
       });
-    }
-    if (typeof bibId === 'undefined') {
-      return null;
-    }
-    let bookObject: BookObject = {
-      bib_id: bibId,
-      author: {
-        lastname: ''
-      },
-      original_title: '',
-      title: '',
-      language: '',
-      isbn: [],
-      udk_class: '',
-      coauthors: []
-    };
-    let rejected = false;
-    bibTags.each((i: number, ele: any) => {
-      let field = handleField($(ele), $);
-      if (field !== null) {
-        if (field.field === 'rejected') {
-          // Rejected result
-          rejected = true;
-          return false;
-        }
-        bookObject[field.field] = field.value;
-      }
-    });
-    if (rejected) {
-      return null;
-    }
-    if (bookObject['original_title'].length > 0) {
-      return bookObject;
-    }
-    if (bookObject['title'].length > 0) {
-      bookObject['original_title'] = bookObject['title'];
-      return bookObject;
-    }
-    debug('For information, this book did not have title and was skipped from results:');
-    debug(bookObject);
-    return null;
-  }
-
-  function handleSearchResult(search: string, mode: SEARCH_MODE, $: any): Promise<Array<Result | Author>> {
-    return new Promise((resolve, reject) => {
-      let results: Array<Result | Author> = [];
-      if ($('.noHitsError').length) {
-        resolve([]);
-      }
-      switch (mode) {
-        case SEARCH_MODE.AUTHOR:
-          let nameElements = $('.resultHeading a');          
-          let repeatchecker: string[] = [];
-          nameElements.each(function() {
-            let parts = $(this).text().trim().split(',');
-            if (parts[0].length > 0) {
-              let result: Author = {
-                lastname: parts[0]
-              };
-              if (parts.length > 1) {
-                let firstname = parts[1].trim().replace(/([^A-Z])\.$/, '$1');
-                if (firstname.length > 0) {
-                  result.firstname = firstname;
-                }
-              }
-              let hash = md5(result.lastname + (typeof result.firstname !== 'undefined' ? result.firstname : ''));
-              if (repeatchecker.indexOf(hash) === -1) {
-                repeatchecker.push(hash);
-                results.push(result);
-              }
-            }
-          });
-          break;
-        case SEARCH_MODE.ISBN:
-          let result = handleSingleBook(search, $);
-          if (result !== null) {
-            results.push({result});
-          }
-          break;
-        case SEARCH_MODE.TITLE:
-          let links = $('.line1Link');
-          if (!links.length) {
-            // Probably a direct hit, handle a single book result
-            let result = handleSingleBook(search, $);
-            if (result !== null) {
-              results.push({
-                result
-              });
-            }
-            break;
-          }
-          let promises: Array<Promise<Result>> = [];
-          links.each(function () {
-            let titleParts = $(this).text().trim().replace(/\.$/, '').split('/');
-            let title: string;
-            if (titleParts.length > 1) {
-              title = titleParts.slice(0, titleParts.length - 1).join('/').trim();
-            } else {
-              title = titleParts[0];
-            }
-            if (title.toLowerCase().includes(search.toLowerCase())) {
-              // Candidate for a search result, get the book page
-              promises.push(new Promise((linkresolve, linkreject) => {
-                // debug($(this).find('a').attr('href')); // Logs link where single book info is found
-                let href = $(this).find('a').attr('href');
-                let searchurl = 'https://fennica.linneanet.fi/vwebv/' + href;
-                debug('starting sub request ' + href);
-                jsdom.env(
-                  searchurl,
-                  ['http://code.jquery.com/jquery.js'],
-                  (err, window: Window) => {
-                    debug('sub request done ' + href);
-                    if (err) {
-                      debug(err);
-                      linkreject(err);
-                      return;
-                    }
-                    let bibMatch = searchurl.match(/bibId=([\d]+)/);
-                    let result = null;
-                    if (bibMatch !== null) {
-                      result = handleSingleBook(search, window.$, bibMatch[1]);
-                    }
-                    if (result !== null) {
-                      linkresolve({
-                        result,
-                        url: searchurl
-                      });
-                    } else {
-                      linkresolve(null);
-                    }
-                  }
-                );
-              }));
-            }
-          });
-          Promise.all(promises).then((results) => {
-            results = results.filter((res) => {
-              return res !== null;
-            });
-            resolve(results);
-          });
-          return;
-      }
-      resolve(results);
-    });
-  }
-
-  export function search(search: string, mode: SEARCH_MODE): Promise<SearchResult> {
-    return new Promise<SearchResult>(
-      (resolve, reject) => {
-        let searchurl = 'https://fennica.linneanet.fi/vwebv/search?searchArg=%s&searchCode=%m&setLimit=2&recCount=10&searchType=1&page.search.search.button=Hae'
-          .replace(/%s/g, encodeURIComponent(search))
-          .replace(/%m/g, SEARCH_MODE_MAP[mode]);
-        debug('starting request ' + searchurl);
-        jsdom.env(
-          searchurl,
-          ['http://code.jquery.com/jquery.js'],
-          (err, window: Window) => {
-            debug('request done ' + searchurl);
-            if (err) {
-              reject(err);
-              return;
-            }
-            handleSearchResult(search, mode, window.$)
-              .then((res) => {
-                resolve({
-                  results: res,
-                  url: searchurl
-                });
-              })
-              .catch((err) => {
-                console.log(err);
-              });
-          }
+      if (unhandled) {
+        debugWarning(
+          "Unhandled field " +
+            indicatorString +
+            ":" +
+            data.type +
+            " " +
+            JSON.stringify(data.data)
+        );
+      } else {
+        debug(
+          "Ignored field " +
+            indicatorString +
+            ":" +
+            data.type +
+            " " +
+            JSON.stringify(data.data)
         );
       }
+      return [];
+    }
+    debug(
+      "Handled field " +
+        indicatorString +
+        ":" +
+        data.type +
+        " " +
+        JSON.stringify(data.data)
     );
+    let fields: BookField[] = [];
+    let rowData: MarcControlField | MarcDataField[];
+
+    function addField(field: string, value: any): void {
+      fields.push({
+        field,
+        value
+      });
+    }
+
+    function unhandledSubfield(indicatorString, dataType, subdataCode, data) {
+      debugWarning(
+        "Unhandled subfield " +
+          indicatorString +
+          ":" +
+          dataType +
+          ":" +
+          subdataCode +
+          " " +
+          JSON.stringify(data)
+      );
+    }
+
+    switch (data.type) {
+      case "008":
+        rowData = <MarcControlField>data.data;
+        let pubinf: PublishingInformation;
+        switch (rowData[6]) {
+          case "c":
+          case "e":
+          case "q":
+          case "s":
+          case "t":
+          case "u":
+            pubinf = {
+              year: parseInt(rowData.substr(7, 4))
+            };
+            break;
+          case "d":
+          case "m":
+            pubinf = {
+              year: parseInt(rowData.substr(7, 4)),
+              year_end: parseInt(rowData.substr(11, 4))
+            };
+            break;
+          case "r":
+            let original = parseInt(rowData.substr(11, 4));
+            pubinf = {
+              year: parseInt(rowData.substr(7, 4))
+            };
+            if (!isNaN(original)) {
+              pubinf.year_original = original;
+            }
+            break;
+          case "b":
+          case "n":
+          case "|":
+            break;
+          default:
+            debugWarning("Unsupported publish date type: " + rowData[6]);
+        }
+        if (typeof pubinf !== "undefined") {
+          addField("publishing_information", pubinf);
+        }
+        let lang = rowData.substr(35, 3);
+        if (lang !== "|||") {
+          addField("language", lang);
+        }
+        break;
+      case "020":
+        rowData = <MarcDataField[]>data.data;
+        let isbn: ISBNObject = {
+          isbn: null
+        };
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              isbn.isbn = subdata.value;
+              break;
+            case "q":
+              isbn.additional = subdata.value;
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        addField("isbn", [isbn]);
+        break;
+      case "041":
+        rowData = <MarcDataField[]>data.data;
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              addField("language", subdata.value);
+              break;
+            case "h":
+              addField("original_language", subdata.value);
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        break;
+      case "080":
+        rowData = <MarcDataField[]>data.data;
+        let xHandled = false;
+        let udkClass: string[] = [];
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              udkClass.push(subdata.value);
+              break;
+            case "x":
+              if (!xHandled) {
+                udkClass.push(subdata.value);
+                xHandled = true;
+              }
+              break;
+            case "2":
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        addField("udk_class", udkClass.join(" "));
+        break;
+      case "084":
+        rowData = <MarcDataField[]>data.data;
+        let isYkl = false;
+        let yklClass: string = null;
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              yklClass = subdata.value;
+              break;
+            case "2":
+              if (subdata.value === "ykl") {
+                isYkl = true;
+              }
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        if (isYkl) {
+          addField("ykl_class", [yklClass]);
+        }
+        break;
+      case "100":
+        rowData = <MarcDataField[]>data.data;
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              addField(
+                "author",
+                handleSingleAuthorRow(subdata.value.split(","))
+              );
+              break;
+            case "c":
+            case "e":
+            case "g":
+            case "j":
+              addField("author", { additional: [subdata.value] });
+              break;
+            case "d":
+            case "0":
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        break;
+      case "240":
+        rowData = <MarcDataField[]>data.data;
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              addField("original_title", subdata.value.replace(/,$/, ""));
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        break;
+      case "245":
+        rowData = <MarcDataField[]>data.data;
+        let title = [];
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+            case "b":
+            case "n":
+            case "p":
+              title.push(subdata.value.replace(/\.$/, ""));
+              break;
+            case "c":
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        if (title.length) {
+          addField(
+            "title",
+            title
+              .join(" ")
+              .replace(/[\/.]$/, "")
+              .trim()
+          );
+        }
+        break;
+      case "246":
+        if (data.indicator[0] === "0" || data.indicator[0] === "2") {
+          break;
+        }
+        rowData = <MarcDataField[]>data.data;
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              addField("title", " - " + subdata.value);
+              break;
+            case "i":
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        break;
+      case "250":
+        rowData = <MarcDataField[]>data.data;
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              addField("edition", handleEdition(subdata.value));
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        break;
+      case "260":
+        rowData = <MarcDataField[]>data.data;
+        let publishInformation: PublishingInformation = {};
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              if (subdata.value !== "[S.l.]") {
+                publishInformation.place = subdata.value
+                  .replace(/ :$/, "")
+                  .replace(/[\[\]]/g, "");
+              }
+              break;
+            case "b":
+              if (subdata.value !== "[s.n.]") {
+                publishInformation.publisher = subdata.value
+                  .replace(/,$/, "")
+                  .replace(/[\[\]]/g, "");
+              }
+              break;
+            case "c":
+              const match = subdata.value.match(/[\d]{4}/);
+              if (match !== null) {
+                let year = parseInt(match[0]);
+                if (!isNaN(year)) {
+                  publishInformation.year = year;
+                }
+              } else {
+                debug("match null from " + subdata.value);
+              }
+              break;
+            case "e":
+            case "f":
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        addField("publishing_information", publishInformation);
+        break;
+      case "300":
+        rowData = <MarcDataField[]>data.data;
+        let measurements: Measurements = {};
+        rowData.forEach(subdata => {
+          let parts: string[];
+          switch (subdata.code) {
+            case "a":
+              parts = subdata.value.split(" ");
+              if (
+                ["s.", "sivua"].indexOf(parts[1]) !== -1 &&
+                parts.length >= 2
+              ) {
+                measurements.pages = parseInt(parts[0]);
+              }
+              break;
+            case "b":
+              measurements.additional = subdata.value.replace(/ ;$/, "");
+              break;
+            case "c":
+              parts = subdata.value.split(" ");
+              if (parts.length === 2) {
+                switch (parts[1]) {
+                  case "cm":
+                    measurements.height = parseInt(parts[0]) * 10;
+                    break;
+                  case "mm":
+                    measurements.height = parseInt(parts[0]);
+                    break;
+                  default:
+                    debug("Unhandled measurement " + subdata.value);
+                }
+              } else {
+                debug("Unhandled measurement " + subdata.value);
+              }
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        addField("measurements", measurements);
+        break;
+      case "650":
+        rowData = <MarcDataField[]>data.data;
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              addField("keywords", [subdata.value]);
+              break;
+            case "2":
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        break;
+      case "700":
+        rowData = <MarcDataField[]>data.data;
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              addField("coauthors", [
+                handleSingleAuthorRow(subdata.value.split(","))
+              ]);
+              break;
+            case "i":
+            case "d":
+            case "t":
+            case "0":
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        break;
+      case "490":
+      case "830":
+        rowData = <MarcDataField[]>data.data;
+        let series: Series = {
+          name: ""
+        };
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              series.name = subdata.value.replace(/[\.;,]$/, "").trim();
+              break;
+            case "v":
+              series.volume = subdata.value.replace(/[\.;,]$/, "").trim();
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        if (series.name.length) {
+          addField(data.type === "490" ? "series" : "original_series", series);
+        }
+        break;
+      case "800":
+        rowData = <MarcDataField[]>data.data;
+        let ser: Series = {
+          name: ""
+        };
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "t":
+              ser.name = subdata.value.replace(/[\.;,]$/, "").trim();
+              break;
+            case "v":
+              ser.volume = subdata.value.replace(/[\.;,]$/, "").trim();
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        if (ser.name.length) {
+          addField("original_series", ser);
+        }
+        break;
+    }
+    return fields;
+  };
+
+  function handleSingleBook(
+    search: string,
+    dom: Window,
+    bibId?: string
+  ): Promise<boolean | null | BookObject> {
+    return new Promise((resolve, reject) => {
+      try {
+        if (typeof bibId === "undefined") {
+          // find bibId for the book on the page and load the staffView (marc)
+          let actionBoxLinks = Array.from(
+            dom.document.querySelectorAll(".actionBox a")
+          );
+          if (!actionBoxLinks.length) {
+            reject("Can't find marc link");
+            return;
+          }
+          actionBoxLinks.map((ele: Element) => {
+            if (
+              ele.textContent
+                .trim()
+                .toLowerCase()
+                .search(/marc/) !== -1
+            ) {
+              const marcurl = ele.getAttribute("href");
+              const bibMatch = marcurl.match(/bibId=([\d]+)/);
+              bibId = bibMatch[1];
+              // marc link
+              const stop = new Date().getTime() + 1000;
+              while (new Date().getTime() < stop) {}
+              JSDOM.fromURL("https://fennica.linneanet.fi/vwebv/" + marcurl, {
+                cookieJar
+              }).then(dom => {
+                debug(
+                  "request done " +
+                    "https://fennica.linneanet.fi/vwebv/" +
+                    marcurl
+                );
+                handleSingleBook(search, dom.window, bibId)
+                  .then(resolve)
+                  .catch(reject);
+              });
+            }
+          });
+          return;
+        }
+        let bookObject: BookObject = {
+          bib_id: bibId,
+          author: {
+            lastname: ""
+          },
+          original_title: "",
+          title: "",
+          language: "",
+          isbn: [],
+          udk_class: "",
+          ykl_class: [],
+          coauthors: [],
+          keywords: []
+        };
+        let lis = dom.document.querySelectorAll("#divbib > ul > li");
+        debug(dom.document.querySelector("body").innerHTML);
+
+        Array.from(lis).map((ele: Element) => {
+          let tagLabel = ele.querySelector(".tagLabel");
+          if (tagLabel === null) {
+            reject(tagLabel);
+            return;
+          }
+          let label = tagLabel.textContent;
+          let indicator = ele.querySelector(".tagLabel2");
+          let controlField = indicator === null;
+          let fieldTextElements = !controlField
+            ? ele.querySelectorAll(".fieldText span")
+            : ele.querySelectorAll(".fieldText");
+          let activeSub: string = null;
+          let data: MarcData = {
+            type: label,
+            isControlField: controlField,
+            data: null
+          };
+          let fieldData: MarcDataField[] = [];
+          if (!controlField) {
+            data.indicator = indicator.textContent.split("");
+          }
+          Array.from(fieldTextElements).forEach(span => {
+            if (controlField) {
+              data.data = span.textContent;
+              return;
+            }
+            if (span.className === "boldit") {
+              activeSub = span.textContent;
+            }
+            if (span.className === "subfieldMarcData") {
+              fieldData.push({
+                code: activeSub,
+                value: span.textContent
+              });
+            }
+          });
+          if (!controlField) {
+            data.data = fieldData;
+          }
+          let field = handleMarcField(data);
+          field.forEach(field => {
+            if (
+              typeof bookObject[field.field] === "object" &&
+              typeof field.value === "object"
+            ) {
+              if (Array.isArray(bookObject[field.field])) {
+                let arr = <object[]>field.value;
+                bookObject[field.field] = [...bookObject[field.field], ...arr];
+              } else {
+                bookObject[field.field] = {
+                  ...bookObject[field.field],
+                  ...field.value
+                };
+              }
+            } else if (
+              typeof bookObject[field.field] === "string" &&
+              typeof field.value === "string" &&
+              field.value.indexOf(" - ") === 0
+            ) {
+              bookObject[field.field] += field.value;
+            } else {
+              bookObject[field.field] = field.value;
+            }
+          });
+          return data;
+        });
+        resolve(bookObject);
+      } catch (e) {
+        reject(e);
+      }
+      return;
+    });
+  }
+
+  function handleSearchResult(
+    search: string,
+    mode: SEARCH_MODE,
+    dom: Window
+  ): Promise<Array<Result | Author>> {
+    return new Promise((resolve, reject) => {
+      try {
+        let results: Array<Result | Author> = [];
+        if (dom.document.querySelectorAll(".noHitsError").length) {
+          resolve([]);
+        }
+        switch (mode) {
+          case SEARCH_MODE.AUTHOR:
+            let nameElements = dom.document.querySelectorAll(
+              ".resultHeading a"
+            );
+            let repeatchecker: string[] = [];
+            Array.from(nameElements).map((ele: Element) => {
+              let parts = ele.textContent.trim().split(",");
+              if (parts[0].length > 0) {
+                let result: Result | Author = {
+                  lastname: parts[0]
+                };
+                if (parts.length > 1) {
+                  let firstname = parts[1].trim().replace(/([^A-Z])\.$/, "$1");
+                  if (firstname.length > 0) {
+                    result.firstname = firstname;
+                  }
+                }
+                let hash = md5(
+                  result.lastname +
+                    (typeof result.firstname !== "undefined"
+                      ? result.firstname
+                      : "")
+                );
+                if (repeatchecker.indexOf(hash) === -1) {
+                  repeatchecker.push(hash);
+                  results.push(result);
+                }
+              }
+            });
+            resolve(results);
+            break;
+          case SEARCH_MODE.ISBN:
+            handleSingleBook(search, dom)
+              .then(result => {
+                if (result !== null && typeof result !== "boolean") {
+                  results.push({ result });
+                }
+                resolve(results);
+              })
+              .catch(reject);
+            return;
+          case SEARCH_MODE.BIB:
+            handleSingleBook("", dom, search)
+              .then(result => {
+                if (result !== null && typeof result !== "boolean") {
+                  results.push({ result });
+                }
+                resolve(results);
+              })
+              .catch(reject);
+            return;
+          case SEARCH_MODE.TITLE:
+            let links = dom.document.querySelectorAll(".line1Link");
+            if (!links.length) {
+              // Probably a direct hit, handle a single book result
+              handleSingleBook(search, dom).then(result => {
+                if (result !== null && typeof result !== "boolean") {
+                  results.push({ result });
+                }
+                resolve(results);
+              });
+              return;
+            }
+            let promises: Promise<Result>[] = [];
+            Array.from(links).map((ele: Element) => {
+              let titleParts = ele.textContent
+                .trim()
+                .replace(/\.$/, "")
+                .split("/");
+              let title: string;
+              if (titleParts.length > 1) {
+                title = titleParts
+                  .slice(0, titleParts.length - 1)
+                  .join("/")
+                  .trim();
+              } else {
+                title = titleParts[0];
+              }
+              if (title.toLowerCase().includes(search.toLowerCase())) {
+                // Candidate for a search result, get the book page
+                promises.push(
+                  new Promise<Result>((linkresolve, linkreject) => {
+                    let href = ele.querySelector("a").getAttribute("href");
+                    let searchurl =
+                      "https://fennica.linneanet.fi/vwebv/" + href;
+                    debug("starting sub request " + searchurl);
+                    JSDOM.fromURL(searchurl)
+                      .then(dom => {
+                        debug("sub request done " + href);
+                        let bibMatch = searchurl.match(/bibId=([\d]+)/);
+                        if (bibMatch !== null) {
+                          handleSingleBook(
+                            search,
+                            dom.window
+                            // bibMatch[1]
+                          )
+                            .then(result => {
+                              if (
+                                result !== null &&
+                                typeof result !== "boolean"
+                              ) {
+                                linkresolve({ result, url: searchurl });
+                              } else {
+                                linkreject("not book result");
+                              }
+                            })
+                            .catch(linkreject);
+                        } else {
+                          linkreject(null);
+                        }
+                      })
+                      .catch(err => {
+                        linkreject(err);
+                      });
+                  })
+                );
+              }
+            });
+            Promise.all(promises).then(results => {
+              results = results.filter(res => {
+                return res !== null;
+              });
+              resolve(results);
+            });
+            return;
+        }
+        reject("no result");
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  export function search(
+    search: string,
+    mode: SEARCH_MODE
+  ): Promise<SearchResult> {
+    return new Promise<SearchResult>((resolve, reject) => {
+      try {
+        let searchurl, actualurl;
+        switch (mode) {
+          case SEARCH_MODE.BIB:
+            searchurl = "https://fennica.linneanet.fi/vwebv/searchBasic";
+            actualurl = "https://fennica.linneanet.fi/vwebv/staffView?bibId=%s".replace(
+              /%s/,
+              encodeURIComponent(search)
+            );
+            break;
+          default:
+            searchurl = "https://fennica.linneanet.fi/vwebv/search?searchArg=%s&searchCode=%m&setLimit=2&recCount=10&searchType=1&page.search.search.button=Hae&sortBy=PUB_DATE"
+              .replace(/%s/g, encodeURIComponent(search))
+              .replace(/%m/g, SEARCH_MODE_MAP[mode]);
+        }
+        debug("starting request " + searchurl);
+        JSDOM.fromURL(searchurl, { cookieJar }).then(dom => {
+          if (typeof actualurl !== "undefined") { // extra step needed because fennica requires a session before looking at a marc view
+            JSDOM.fromURL(actualurl, { cookieJar }).then(dom => {
+              handleSearchResult(search, mode, dom.window)
+                .then(res => {
+                  resolve({
+                    results: res,
+                    url: searchurl
+                  });
+                })
+                .catch(err => {
+                  debug(err);
+                });
+            });
+            return;
+          }
+          handleSearchResult(search, mode, dom.window)
+            .then(res => {
+              resolve({
+                results: res,
+                url: searchurl
+              });
+            })
+            .catch(err => {
+              debug(err);
+            });
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
   }
 }
