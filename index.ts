@@ -64,6 +64,7 @@ export namespace Fennica {
     keywords: string[];
     series?: Series;
     original_series?: Series;
+    location?: string;
   };
 
   export type Series = {
@@ -119,7 +120,8 @@ export namespace Fennica {
     "650",
     "700",
     "800",
-    "830"
+    "830",
+    "852"
   ];
   const IGNORED_MARC_FIELDS = [
     "000",
@@ -749,6 +751,27 @@ export namespace Fennica {
           addField("original_series", ser);
         }
         break;
+      case "852":
+        rowData = <MarcDataField[]>data.data;
+        let location: string = "";
+        rowData.forEach(subdata => {
+          switch (subdata.code) {
+            case "a":
+              location = subdata.value.trim();
+              break;
+            default:
+              unhandledSubfield(
+                indicatorString,
+                data.type,
+                subdata.code,
+                data.data
+              );
+          }
+        });
+        if (location.length) {
+          addField("location", location);
+        }
+        break;
     }
     return fields;
   };
@@ -813,7 +836,7 @@ export namespace Fennica {
           keywords: []
         };
         let lis = dom.document.querySelectorAll("#divbib > ul > li");
-        debug(dom.document.querySelector("body").innerHTML);
+        // debug(dom.document.querySelector("body").innerHTML);
 
         Array.from(lis).map((ele: Element) => {
           let tagLabel = ele.querySelector(".tagLabel");
