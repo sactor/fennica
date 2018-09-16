@@ -52,7 +52,7 @@ Returns a Promise which will resolve once the search is complete. Promise result
         },
         "original_title": "Witches abroad", // Title in original language
         "title": "Noitia maisemissa", // Localised title
-        "language": "suomi", // Language
+        "language": ["fin"], // Languages
         "edition": { // Optional, edition information about the book (note that additional may contain more editions)
           "editions": [
             {
@@ -79,7 +79,7 @@ Returns a Promise which will resolve once the search is complete. Promise result
           ],
           "raw": "Lisäpainokset: 3. p. 2002." // Raw additional information from the bibliography
         },
-        "original_language": "eng", // Optional, Original language
+        "original_language": ["eng"], // Optional, Original languages
         "isbn": [ // ISBN information, may contain multiple ISBNs if the book has several editions
           "951-23-4113-1 nidottu"
         ],

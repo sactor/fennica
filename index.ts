@@ -346,7 +346,7 @@ export namespace Fennica {
         }
         let lang = rowData.substr(35, 3);
         if (lang !== "|||") {
-          addField("language", lang);
+          addField("language", [lang]);
         }
         break;
       case "020":
@@ -378,10 +378,10 @@ export namespace Fennica {
         rowData.forEach(subdata => {
           switch (subdata.code) {
             case "a":
-              addField("language", subdata.value);
+              addField("language", [subdata.value]);
               break;
             case "h":
-              addField("original_language", subdata.value);
+              addField("original_language", [subdata.value]);
               break;
             default:
               unhandledSubfield(
@@ -886,7 +886,7 @@ export namespace Fennica {
             ) {
               if (Array.isArray(bookObject[field.field])) {
                 let arr = <object[]>field.value;
-                bookObject[field.field] = [...bookObject[field.field], ...arr];
+                bookObject[field.field] = [...new Set([...bookObject[field.field], ...arr])];
               } else {
                 bookObject[field.field] = {
                   ...bookObject[field.field],
