@@ -62,8 +62,8 @@ export namespace Fennica {
     ykl_class: string[];
     coauthors: Author[];
     keywords: string[];
-    series?: Series;
-    original_series?: Series;
+    series?: Series[];
+    original_series?: Series[];
     location?: string;
   };
 
@@ -157,10 +157,10 @@ export namespace Fennica {
       let info = authorinfo[i].trim();
       switch (i) {
         case 0:
-          author["lastname"] = info.replace(/\.$/, "");
+          author.lastname = info.replace(/\.$/, "");
           break;
         case 1:
-          author["firstname"] = info.replace(/([^A-Z])\.$/, "$1");
+          author.firstname = info.replace(/([^A-Z])\.$/, "$1");
           break;
         default:
           if (info.length) {
@@ -168,10 +168,10 @@ export namespace Fennica {
             if (info.includes("ennakkotieto")) {
               return false;
             }
-            if (typeof author["additional"] === "undefined") {
-              author["additional"] = [];
+            if (typeof author.additional === "undefined") {
+              author.additional = [];
             }
-            author["additional"].push(info);
+            author.additional.push(info);
           }
       }
     }
@@ -497,14 +497,32 @@ export namespace Fennica {
       case "245":
         rowData = <MarcDataField[]>data.data;
         let title = [];
+        let mainName;
+        let subSeries;
+        let partName;
+        let volume;
         rowData.forEach(subdata => {
+          let subvalue = subdata.value.replace(/[ .=,/]+$/, "");
+          if (subdata.code === "n") {
+            volume = subvalue;
+          }
+          if (subdata.code === "b") {
+            subSeries = subvalue;
+          }
+          if (subdata.code === "p") {
+            // This means this title is part of a series and a subdata can be used as series name and n as volume
+            partName = subvalue;
+          }
           switch (subdata.code) {
             case "a":
+              mainName = subvalue;
             case "b":
-            case "n":
-            case "p":
-              title.push(subdata.value.replace(/\.$/, ""));
+              title.push(subvalue + " ");
               break;
+            case "n":
+              title.push(subvalue);
+              break;
+            case "p":
             case "c":
               break;
             default:
@@ -516,11 +534,27 @@ export namespace Fennica {
               );
           }
         });
+        if (typeof mainName !== "undefined" && typeof partName !== "undefined" && typeof volume !== "undefined") {
+          addField("series", [{name: mainName, volume}]);
+          title = [mainName];
+          if (typeof subSeries !== "undefined") {
+            addField("series", [{name: subSeries}]);
+            title.push("; " + subSeries);
+          }
+          title.push(", " + volume);
+          title.push(" - " + partName);
+        } else if (typeof partName !== "undefined") {
+          if (title.length > 1) {
+            title.push(", " + partName);
+          } else {
+            title.push(partName);
+          }
+        }
         if (title.length) {
           addField(
             "title",
             title
-              .join(" ")
+              .join("")
               .replace(/[\/.]$/, "")
               .trim()
           );
@@ -722,7 +756,7 @@ export namespace Fennica {
           }
         });
         if (series.name.length) {
-          addField(data.type === "490" ? "series" : "original_series", series);
+          addField(data.type === "490" ? "series" : "original_series", [series]);
         }
         break;
       case "800":
@@ -886,7 +920,7 @@ export namespace Fennica {
             ) {
               if (Array.isArray(bookObject[field.field])) {
                 let arr = <object[]>field.value;
-                bookObject[field.field] = [...new Set([...bookObject[field.field], ...arr])];
+                bookObject[field.field] = [...new Set([...bookObject[field.field], ...arr].map(o => JSON.stringify(o)))].map(s => JSON.parse(s));
               } else {
                 bookObject[field.field] = {
                   ...bookObject[field.field],
