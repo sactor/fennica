@@ -48,7 +48,7 @@ export namespace Fennica {
   };
   export type BookObject = {
     bib_id: string;
-    author: Author;
+    author: Author[];
     original_title: string;
     title: string;
     language: string;
@@ -450,19 +450,22 @@ export namespace Fennica {
         break;
       case "100":
         rowData = <MarcDataField[]>data.data;
+        let authorObj: Author|false = false;
         rowData.forEach(subdata => {
           switch (subdata.code) {
             case "a":
-              addField(
-                "author",
-                handleSingleAuthorRow(subdata.value.split(","))
-              );
+              authorObj = handleSingleAuthorRow(subdata.value.split(","));
               break;
             case "c":
             case "e":
             case "g":
             case "j":
-              addField("author", { additional: [subdata.value] });
+              if (authorObj !== false) {
+                if (typeof authorObj.additional === "undefined") {
+                  authorObj.additional = [];
+                }
+                authorObj.additional.push(subdata.value);
+              } 
               break;
             case "d":
             case "0":
@@ -476,6 +479,9 @@ export namespace Fennica {
               );
           }
         });
+        if (authorObj !== false) {
+          addField("author", [authorObj]); // TODO etsi kirja, jolla useampia kuin yksi tekijä että toimiiko tämä varmasti
+        }
         break;
       case "240":
         rowData = <MarcDataField[]>data.data;
@@ -857,9 +863,7 @@ export namespace Fennica {
         }
         let bookObject: BookObject = {
           bib_id: bibId,
-          author: {
-            lastname: ""
-          },
+          author: [],
           original_title: "",
           title: "",
           language: "",
@@ -939,6 +943,7 @@ export namespace Fennica {
           });
           return data;
         });
+
         resolve(bookObject);
       } catch (e) {
         reject(e);
