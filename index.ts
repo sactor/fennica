@@ -115,6 +115,7 @@ export namespace Fennica {
     "246",
     "250",
     "260",
+    "264",
     "300",
     "490",
     "650",
@@ -131,7 +132,6 @@ export namespace Fennica {
     "035",
     "040",
     "042",
-    "264",
     "336",
     "337",
     "338",
@@ -606,6 +606,10 @@ export namespace Fennica {
         });
         break;
       case "260":
+      case "264":
+        if (data.type === "264" && data.indicator[1] !== "1") {
+          break;
+        }
         rowData = <MarcDataField[]>data.data;
         let publishInformation: PublishingInformation = {};
         rowData.forEach(subdata => {
@@ -750,7 +754,7 @@ export namespace Fennica {
               series.name = subdata.value.replace(/[\.;,]$/, "").trim();
               break;
             case "v":
-              series.volume = subdata.value.replace(/[\.;,]$/, "").trim();
+              series.volume = subdata.value.replace(/[\.;,\[\]]$/, "").trim();
               break;
             default:
               unhandledSubfield(
