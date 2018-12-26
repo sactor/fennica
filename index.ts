@@ -35,7 +35,7 @@ export namespace Fennica {
     raw?: string;
   };
   export type Measurements = {
-    pages?: number;
+    pages?: string;
     height?: number;
     additional?: string;
   };
@@ -450,7 +450,7 @@ export namespace Fennica {
         break;
       case "100":
         rowData = <MarcDataField[]>data.data;
-        let authorObj: Author|false = false;
+        let authorObj: Author | false = false;
         rowData.forEach(subdata => {
           switch (subdata.code) {
             case "a":
@@ -465,7 +465,7 @@ export namespace Fennica {
                   authorObj.additional = [];
                 }
                 authorObj.additional.push(subdata.value);
-              } 
+              }
               break;
             case "d":
             case "0":
@@ -540,11 +540,15 @@ export namespace Fennica {
               );
           }
         });
-        if (typeof mainName !== "undefined" && typeof partName !== "undefined" && typeof volume !== "undefined") {
-          addField("series", [{name: mainName, volume}]);
+        if (
+          typeof mainName !== "undefined" &&
+          typeof partName !== "undefined" &&
+          typeof volume !== "undefined"
+        ) {
+          addField("series", [{ name: mainName, volume }]);
           title = [mainName];
           if (typeof subSeries !== "undefined") {
-            addField("series", [{name: subSeries}]);
+            addField("series", [{ name: subSeries }]);
             title.push("; " + subSeries);
           }
           title.push(", " + volume);
@@ -660,13 +664,35 @@ export namespace Fennica {
           let parts: string[];
           switch (subdata.code) {
             case "a":
-              parts = subdata.value.split(" ");
-              if (
-                ["s.", "sivua"].indexOf(parts[1]) !== -1 &&
-                parts.length >= 2
-              ) {
-                measurements.pages = parseInt(parts[0]);
+              let value = subdata.value;
+              value = value.replace(/\[/g, "(").replace(/\]/g, ")");
+              parts = value.split(" ");
+              parts = parts.filter(value => {
+                if (
+                  ["s.", "sivua", "sivua,"].indexOf(value) !== -1 ||
+                  !/[\w]/.test(value)
+                ) {
+                  return false;
+                }
+                return true;
+              });
+              parts = parts.map(value => {
+                value = value.replace(/,$/, "");
+                value = value.replace(/sivua\)$/, ")");
+                return value;
+              });
+              value = parts.join(" ");
+              let matches = /^\((\S+)\)$/.exec(value);
+              if (matches) {
+                value = matches[1];
               }
+              let prevValue: string;
+              do {
+                prevValue = value;
+                value = value.replace(/(\(?\d+\)?) (\(?\d+\)?)/g, "$1+$2");
+              } while (prevValue !== value);
+              value = value.replace(" )", ")");
+              measurements.pages = value;
               break;
             case "b":
               measurements.additional = subdata.value.replace(/ ;$/, "");
@@ -766,7 +792,9 @@ export namespace Fennica {
           }
         });
         if (series.name.length) {
-          addField(data.type === "490" ? "series" : "original_series", [series]);
+          addField(data.type === "490" ? "series" : "original_series", [
+            series
+          ]);
         }
         break;
       case "800":
@@ -878,6 +906,7 @@ export namespace Fennica {
           keywords: []
         };
         let lis = dom.document.querySelectorAll("#divbib > ul > li");
+        // debug(bibId + ': ' + lis.length);
         // debug(dom.document.querySelector("body").innerHTML);
 
         Array.from(lis).map((ele: Element) => {
@@ -928,7 +957,13 @@ export namespace Fennica {
             ) {
               if (Array.isArray(bookObject[field.field])) {
                 let arr = <object[]>field.value;
-                bookObject[field.field] = [...new Set([...bookObject[field.field], ...arr].map(o => JSON.stringify(o)))].map(s => JSON.parse(s));
+                bookObject[field.field] = [
+                  ...new Set(
+                    [...bookObject[field.field], ...arr].map(o =>
+                      JSON.stringify(o)
+                    )
+                  )
+                ].map(s => JSON.parse(s));
               } else {
                 bookObject[field.field] = {
                   ...bookObject[field.field],
@@ -1053,6 +1088,30 @@ export namespace Fennica {
                     let href = ele.querySelector("a").getAttribute("href");
                     let searchurl =
                       "https://fennica.linneanet.fi/vwebv/" + href;
+                    if (searchurl.indexOf("holdingsInfo") > -1) {
+                      searchurl = searchurl.replace(
+                        "holdingsInfo",
+                        "staffView"
+                      );
+                      const bibMatch = searchurl.match(/bibId=([\d]+)/);
+                      debug("starting sub request " + searchurl);
+                      JSDOM.fromURL(searchurl, { cookieJar }).then(dom => {
+                        debug("sub request done " + searchurl);
+                        handleSingleBook(search, dom.window, bibMatch[1])
+                          .then(result => {
+                            if (
+                              result !== null &&
+                              typeof result !== "boolean"
+                            ) {
+                              linkresolve({ result, url: searchurl });
+                            } else {
+                              linkreject("not book result");
+                            }
+                          })
+                          .catch(linkreject);
+                      });
+                      return;
+                    }
                     debug("starting sub request " + searchurl);
                     JSDOM.fromURL(searchurl)
                       .then(dom => {
@@ -1123,7 +1182,8 @@ export namespace Fennica {
         }
         debug("starting request " + searchurl);
         JSDOM.fromURL(searchurl, { cookieJar }).then(dom => {
-          if (typeof actualurl !== "undefined") { // extra step needed because fennica requires a session before looking at a marc view
+          if (typeof actualurl !== "undefined") {
+            // extra step needed because fennica requires a session before looking at a marc view
             JSDOM.fromURL(actualurl, { cookieJar }).then(dom => {
               handleSearchResult(search, mode, dom.window)
                 .then(res => {
